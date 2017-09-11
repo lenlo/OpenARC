@@ -12,10 +12,10 @@ AC_PREREQ(2.61)
 #
 # Package version
 #
-m4_define([VERSION_RELEASE], 1)
-m4_define([VERSION_MAJOR_REV], 0)
+m4_define([VERSION_RELEASE], 0)
+m4_define([VERSION_MAJOR_REV], 9)
 m4_define([VERSION_MINOR_REV], 0)
-m4_define([VERSION_PATCH], 0)
+m4_define([VERSION_PATCH], m4_esyscmd([bash version.sh]))
 
 #
 # Library version
@@ -30,7 +30,7 @@ m4_define([LIBVERSION_AGE], 0)
 # Autotools setup
 #
 AC_INIT([OpenARC],
-        [VERSION_RELEASE.VERSION_MAJOR_REV.VERSION_MINOR_REV],
+        [VERSION_RELEASE.VERSION_MAJOR_REV.VERSION_MINOR_REV.VERSION_PATCH],
         [bugs@trusteddomain.org])
 
 AC_CONFIG_AUX_DIR([build-aux])
