@@ -1477,6 +1477,10 @@ arcf_config_load(struct config *data, struct arcf_config *conf,
 		                  &conf->conf_keyfile,
 		                  sizeof conf->conf_keyfile);
 
+		(void) config_get(data, "SafeKeys",
+		                  &conf->conf_safekeys,
+		                  sizeof conf->conf_safekeys);
+
 		(void) config_get(data, "EnableCoredumps",
 		                  &conf->conf_enablecores,
 		                  sizeof conf->conf_enablecores);
@@ -1593,7 +1597,7 @@ arcf_config_load(struct config *data, struct arcf_config *conf,
 		_Bool status;
 		char *dberr = NULL;
 
-		status = arcf_addlist(&conf->conf_internal, "127.0.0.1",
+		status = arcf_addlist(&conf->conf_internal, strdup("127.0.0.1"),
 		                      &dberr);
 		if (!status)
 		{

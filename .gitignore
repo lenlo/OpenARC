@@ -1,58 +1,52 @@
-# Object files
-*.o
-*.ko
-*.obj
-*.elf
 
-# Precompiled Headers
-*.gch
-*.pch
-
-# Libraries
-*.lib
+*#*
+*~
 *.a
-*.la
-*.lo
-
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
-
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
-
-# Debug files
-*.dSYM/
-
-# tarballs
-*.tar.gz
-
-# other nonsense
 aclocal.m4
+*.app
 autom4te.cache
 build-aux
 build-config.h
 build-config.h.in
-configure
-libtool
-Makefile
-Makefile.in
+*.cache
+# compilation artifacts
 CONFIG
 config.log
 config.status
-stamp-h1
+configure
+# Debug files
 .deps/*
-*~
-*.cache
-*#*
-
-# compilation artifacts
+*.dll
+*.dSYM/
+*.dylib
+*.elf
+*.exe
+# Executables
+*.gch
+*.hex
+*.i*86
+*.ko
+*.la
+*.lib
 libopenarc/symbols.map
+# Libraries
+libtool
+*.lo
+Makefile
+Makefile.in
+*.o
+*.obj
+# Object files
 openarc/.libs/
+# other nonsense
+*.out
+*.pch
+# Precompiled Headers
+# Shared objects (inc. Windows DLLs)
+*.so
+*.so.*
+stamp-h1
+**/TAGS
+# tarballs
+*.tar.gz
+*.x86_64
