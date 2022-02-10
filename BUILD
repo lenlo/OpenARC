@@ -1,4 +1,5 @@
-# INSTALL
+# OPENARC BUILD INSTRUCTIONS
+# ==========================
 
 # To build and install OpenARC, first make sure that the prerequisits are
 # satisfied:
@@ -11,6 +12,7 @@ aclocal && autoconf && autoreconf --install && automake --add-missing && ./confi
 
 # Followed by:
 
-sudo make install
+make
 
-# to install into /usr/local
+# To install
+echo 'run "make install" to install into /usr/local"
