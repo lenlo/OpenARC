@@ -42,6 +42,7 @@ struct configdef arcf_config[] =
 	{ "Mode",			CONFIG_TYPE_STRING,	FALSE },
 	{ "PeerList",			CONFIG_TYPE_STRING,	FALSE },
 	{ "PidFile",			CONFIG_TYPE_STRING,	FALSE },
+	{ "SafeKeys",			CONFIG_TYPE_BOOLEAN,	TRUE },
 	{ "Selector",			CONFIG_TYPE_STRING,	TRUE },
 	{ "SignatureAlgorithm",		CONFIG_TYPE_STRING,	FALSE },
 	{ "SignHeaders",		CONFIG_TYPE_STRING,	FALSE },
