@@ -122,4 +122,18 @@ typedef struct arc_plist ARC_PLIST;
 struct arc_canon;
 typedef struct arc_canon ARC_CANON;
 
+/*
+**  memory allocation wrappers
+*/
+
+#include <openssl/crypto.h>
+#define ARC_FREE	OPENSSL_free
+#define ARC_MALLOC	OPENSSL_malloc
+#define ARC_REALLOC	OPENSSL_realloc
+#ifdef OPENSSL_strdup
+# define ARC_STRDUP	OPENSSL_strdup
+#else /* OPENSSL_strdup */
+# define ARC_STRDUP	arc_strdup
+#endif /* OPENSSL_strdup */
+
 #endif /* ! _ARC_INTERNAL_H_ */

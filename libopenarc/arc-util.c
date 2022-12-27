@@ -101,7 +101,7 @@ arc_dstring_resize(struct arc_dstring *dstr, int len)
 		}
 	}
 
-	new = malloc(newsz);
+	new = ARC_MALLOC(newsz);
 	if (new == NULL)
 	{
 		arc_error(dstr->ds_msg, "unable to allocate %d byte(s)",
@@ -110,7 +110,7 @@ arc_dstring_resize(struct arc_dstring *dstr, int len)
 	}
 
 	memcpy(new, dstr->ds_buf, dstr->ds_alloc);
-	free(dstr->ds_buf);
+	ARC_FREE(dstr->ds_buf);
 	dstr->ds_alloc = newsz;
 	dstr->ds_buf = new;
 
@@ -144,7 +144,7 @@ arc_dstring_new(ARC_MESSAGE *msg, int len, int maxlen)
 	if (len < BUFRSZ)
 		len = BUFRSZ;
 
-	new = (struct arc_dstring *) malloc(sizeof *new);
+	new = (struct arc_dstring *) ARC_MALLOC(sizeof *new);
 	if (new == NULL)
 	{
 		arc_error(msg, "unable to allocate %d byte(s)",
@@ -153,12 +153,12 @@ arc_dstring_new(ARC_MESSAGE *msg, int len, int maxlen)
 	}
 
 	new->ds_msg = msg;
-	new->ds_buf = malloc(len);
+	new->ds_buf = ARC_MALLOC(len);
 	if (new->ds_buf == NULL)
 	{
 		arc_error(msg, "unable to allocate %d byte(s)",
 		          sizeof(struct arc_dstring));
-		free(new);
+		ARC_FREE(new);
 		return NULL;
 	}
 
@@ -186,8 +186,8 @@ arc_dstring_free(struct arc_dstring *dstr)
 {
 	assert(dstr != NULL);
 
-	free(dstr->ds_buf);
-	free(dstr);
+	ARC_FREE(dstr->ds_buf);
+	ARC_FREE(dstr);
 }
 
 /*
@@ -420,6 +420,29 @@ arc_dstring_blank(struct arc_dstring *dstr)
 	dstr->ds_buf[0] = '\0';
 }
 
+
+/*
+**  ARC_STRDUP -- save a copy of a string
+**
+**  Parameters:
+**  	s1 -- string to copy
+**
+**  Return value:
+**  	a copy of s1.
+*/
+
+char *
+arc_strdup(const char *s1)
+{
+	char *s;
+	
+	s = ARC_MALLOC(strlen(s1) + 1);
+	if (s != NULL)
+	    memcpy(s, s1, strlen(s1) + 1);
+	return s;
+}
+
+
 /*
 **  ARC_DSTRING_PRINTF -- write variable length formatted output to a dstring
 **
@@ -485,7 +508,7 @@ arc_strndup(u_char *src, size_t len)
 {
 	u_char *ret;
 
-	ret = malloc(len + 1);
+	ret = ARC_MALLOC(len + 1);
 	if (ret != NULL)
 	{
 		memset(ret, '\0', len + 1);
@@ -914,18 +937,18 @@ arc_copy_array(char **in)
 	for (n = 0; in[n] != NULL; n++)
 		continue;
 
-	out = malloc(sizeof(char *) * (n + 1));
+	out = ARC_MALLOC(sizeof(char *) * (n + 1));
 	if (out == NULL)
 		return NULL;
 
 	for (c = 0; c < n; c++)
 	{
-		out[c] = strdup(in[c]);
+		out[c] = ARC_STRDUP(in[c]);
 		if (out[c] == NULL)
 		{
 			for (n = 0; n < c; n++)
-				free(out[n]);
-			free(out);
+				ARC_FREE(out[n]);
+			ARC_FREE(out);
 			return NULL;
 		}
 	}
@@ -953,7 +976,7 @@ arc_clobber_array(char **in)
 	assert(in != NULL);
 
 	for (n = 0; in[n] != NULL; n++)
-		free(in[n]);
+		ARC_FREE(in[n]);
 
-	free(in);
+	ARC_FREE(in);
 }

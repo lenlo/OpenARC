@@ -89,7 +89,6 @@
 
 /* macros */
 #define CMDLINEOPTS	"Ac:fhlnp:P:r:t:u:vV"
-#define AR_HEADER_NAME	"Authentication-Results"
 
 /*
 **  CONFIGVALUE -- a list of configuration values
@@ -116,6 +115,7 @@ struct arcf_config
 	_Bool		conf_addswhdr;		/* add software header field */
 	_Bool		conf_safekeys;		/* require safe keys */
 	_Bool		conf_keeptmpfiles;	/* keep temp files */
+	_Bool		conf_finalreceiver;	/* act as final receiver */
 	u_int		conf_refcnt;		/* reference count */
 	u_int		conf_mode;		/* mode flags */
 	arc_canon_t	conf_canonhdr;		/* canonicalization for header */
@@ -139,6 +139,7 @@ struct arcf_config
 	ARC_LIB *	conf_libopenarc;	/* shared library instance */
 	struct conflist conf_peers;		/* peers hosts */
 	struct conflist conf_internal;		/* internal hosts */
+	struct conflist conf_sealheaderchecks;	/* header checks for sealing */
 };
 
 /*
@@ -1281,7 +1282,7 @@ arcf_addlist(struct conflist *list, char *str, char **err)
 		*err = strerror(errno);
 		return FALSE;
 	}
-	v->value = str;
+	v->value = strdup(str);
 
 	LIST_INSERT_HEAD(list, v, entries);
 	return TRUE;
@@ -1347,6 +1348,9 @@ arcf_config_free(struct arcf_config *conf)
 
 	if (conf->conf_oversignhdrs != NULL)
 		free(conf->conf_oversignhdrs);
+
+	if (!LIST_EMPTY(&conf->conf_sealheaderchecks))
+		arcf_list_destroy(&conf->conf_sealheaderchecks);
 
 	free(conf);
 }
@@ -1481,6 +1485,10 @@ arcf_config_load(struct config *data, struct arcf_config *conf,
 		                  &conf->conf_enablecores,
 		                  sizeof conf->conf_enablecores);
 
+		(void) config_get(data, "FinalReceiver",
+		                  &conf->conf_finalreceiver,
+		                  sizeof conf->conf_finalreceiver);
+
 		(void) config_get(data, "TemporaryDirectory",
 		                  &conf->conf_tmpdir,
 		                  sizeof conf->conf_tmpdir);
@@ -1500,6 +1508,24 @@ arcf_config_load(struct config *data, struct arcf_config *conf,
 		(void) config_get(data, "OverSignHeaders",
 		                  &conf->conf_oversignhdrs_raw,
 		                  sizeof conf->conf_oversignhdrs_raw);
+
+		str = NULL;
+		(void) config_get(data, "SealHeaderChecks", &str, sizeof str);
+		if (str != NULL)
+		{
+			_Bool status;
+			char *dberr = NULL;
+
+			status = arcf_list_load(&conf->conf_sealheaderchecks,
+			                        str, &dberr);
+			if (!status)
+			{
+				snprintf(err, errlen,
+				        "%s: arcf_list_load(): %s",
+			         	str, dberr);
+				return -1;
+			}
+		}
 
 		str = NULL;
 		(void) config_get(data, "FixedTimestamp", &str, sizeof str);
@@ -1577,11 +1603,11 @@ arcf_config_load(struct config *data, struct arcf_config *conf,
 		(void) config_get(data, "InternalHosts", &str, sizeof str);
 	if (str != NULL)
 	{
-		int status;
+		_Bool status;
 		char *dberr = NULL;
 
 		status = arcf_list_load(&conf->conf_internal, str, &dberr);
-		if (status != 0)
+		if (!status)
 		{
 			snprintf(err, errlen, "%s: arcf_list_load(): %s",
 			         str, dberr);
@@ -1593,8 +1619,17 @@ arcf_config_load(struct config *data, struct arcf_config *conf,
 		_Bool status;
 		char *dberr = NULL;
 
-		status = arcf_addlist(&conf->conf_internal, "127.0.0.1",
-		                      &dberr);
+		str = LOCALHOST;
+		status = arcf_addlist(&conf->conf_internal, str, &dberr);
+		if (!status)
+		{
+			snprintf(err, errlen, "%s: arcf_addlist(): %s",
+			         str, dberr);
+			return -1;
+		}
+
+		str = LOCALHOST6;
+		status = arcf_addlist(&conf->conf_internal, str, &dberr);
 		if (!status)
 		{
 			snprintf(err, errlen, "%s: arcf_addlist(): %s",
@@ -3190,6 +3225,127 @@ mlfi_eoh(SMFICTX *ctx)
 		}
 	}
 
+#ifdef USE_JANSSON
+	/*
+	**  If we only care about messages with specific header properties,
+	**  see if this is one of those.
+	*/
+
+	if (!LIST_EMPTY(&conf->conf_sealheaderchecks))
+	{
+		_Bool found = FALSE;
+		int restatus;
+		struct configvalue *node;
+		char buf[BUFRSZ];
+
+		LIST_FOREACH(node, &conf->conf_sealheaderchecks, entries)
+		{
+			int hfnum = 0;
+			char *hfname = NULL;
+			char *hfmatch;
+			regex_t re;
+			json_t *json;
+			const char *str;
+			json_error_t json_err;
+
+			strlcpy(buf, node->value, sizeof buf);
+			hfmatch = strchr(buf, ':');
+			if (hfmatch != NULL)
+			{
+				hfname = buf;
+				*hfmatch++ = '\0';
+			}
+
+			if (hfmatch != NULL)
+				restatus = regcomp(&re, hfmatch, 0);
+
+			if (hfname == NULL || hfmatch == NULL || restatus != 0)
+			{
+				if (conf->conf_dolog)
+				{
+					syslog(LOG_ERR,
+					       "%s: invalid seal header check \"%s\"",
+					       afc->mctx_jobid,
+					       node->value);
+				}
+			}
+
+			for (hfnum = 0; !found; hfnum++)
+			{
+				hdr = arcf_findheader(afc, hfname, hfnum);
+				if (hdr == NULL)
+					break;
+
+				json = json_loads(hdr->hdr_val, 0, &json_err);
+				if (json != NULL)
+				{
+					if (json_is_string(json))
+					{
+						str = json_string_value(json);
+						if (regexec(&re, str,
+					                    0, NULL, 0) == 0)
+						{
+							found = TRUE;
+							break;
+						}
+					}
+					else if (json_is_array(json))
+					{
+						size_t jn;
+						json_t *entry;
+
+						for (jn = 0;
+						     !found && jn < json_array_size(json);
+						     jn++)
+						{
+							entry = json_array_get(json,
+							                       jn);
+
+							if (json_is_string(entry))
+							{
+								str = json_string_value(entry);
+
+								if (regexec(&re,
+								            str,
+								            0,
+								            NULL,
+								            0) == 0)
+								{
+									found = TRUE;
+									break;
+								}
+							}
+	
+						}
+					}
+
+					json_decref(json);
+				}
+				else if (regexec(&re, hdr->hdr_val,
+				                 0, NULL, 0) == 0)
+				{
+					found = TRUE;
+					break;
+				}
+			}
+
+			regfree(&re);
+		}
+
+		if (!found)
+		{
+			if (conf->conf_dolog)
+			{
+				syslog(LOG_INFO,
+				       "%s: no seal header check matched; continuing",
+				       afc->mctx_jobid);
+			}
+
+			return SMFIS_ACCEPT;
+		}
+	}
+#endif /* USE_JANSSON */
+
 	/* run the header fields */
 	mode = conf->conf_mode;
 	if (mode == 0)
@@ -3372,9 +3528,13 @@ mlfi_eom(SMFICTX *ctx)
 	struct arcf_config *conf;
 	ARC_HDRFIELD *seal = NULL;
 	ARC_HDRFIELD *sealhdr = NULL;
+	const char *ipout = NULL;
+	struct sockaddr *ip;
 	Header hdr;
 	struct authres ar;
 	unsigned char header[ARC_MAXHEADER + 1];
+	u_char arcchainbuf[ARC_MAXHEADER + 1];
+	char ipbuf[ARC_MAXHOSTNAMELEN + 1];
 
 	assert(ctx != NULL);
 
@@ -3404,11 +3564,52 @@ mlfi_eom(SMFICTX *ctx)
 		}
 	}
 
+	if (afc->mctx_tmpstr == NULL)
+	{
+		afc->mctx_tmpstr = arcf_dstring_new(BUFRSZ, 0);
+		if (afc->mctx_tmpstr == NULL)
+		{
+			if (conf->conf_dolog)
+				syslog(LOG_ERR, "arcf_dstring_new() failed");
+
+			return SMFIS_TEMPFAIL;
+		}
+	}
+
 	/* get hostname; used in the X header and in new MIME boundaries */
 	hostname = arcf_getsymval(ctx, "j");
 	if (hostname == NULL)
 		hostname = HOSTUNKNOWN;
 
+	ip = (struct sockaddr *) &cc->cctx_ip;
+	memset(ipbuf, '\0', sizeof ipbuf);
+
+	switch (ip->sa_family)
+	{
+	  case AF_INET:
+	  {
+		struct sockaddr_in sin;
+
+		memcpy(&sin, ip, sizeof sin);
+		ipout = inet_ntop(ip->sa_family, &sin.sin_addr,
+		                  ipbuf, sizeof ipbuf);
+		break;
+	  }
+	
+	  case AF_INET6:
+	  {
+		struct sockaddr_in6 sin6;
+
+		memcpy(&sin6, ip, sizeof sin6);
+		ipout = inet_ntop(ip->sa_family, &sin6.sin6_addr,
+		                  ipbuf, sizeof ipbuf);
+		break;
+	  }
+
+	  default:
+		break;
+	}
+	
 	/*
 	**  Signal end-of-message to ARC.
 	*/
@@ -3430,29 +3631,12 @@ mlfi_eom(SMFICTX *ctx)
 	{
 		int arfound = 0;
 
-		if (afc->mctx_tmpstr == NULL)
-		{
-			afc->mctx_tmpstr = arcf_dstring_new(BUFRSZ, 0);
-			if (afc->mctx_tmpstr == NULL)
-			{
-				if (conf->conf_dolog)
-				{
-					syslog(LOG_ERR,
-					       "arcf_dstring_new() failed");
-				}
-
-				return SMFIS_TEMPFAIL;
-			}
-		}
-		else
-		{
-			arcf_dstring_blank(afc->mctx_tmpstr);
-		}
+		arcf_dstring_blank(afc->mctx_tmpstr);
 
 		/* assemble authentication results */
 		for (c = 0; ; c++)
 		{
-			hdr = arcf_findheader(afc, AR_HEADER_NAME, c);
+			hdr = arcf_findheader(afc, AUTHRESULTSHDR, c);
 			if (hdr == NULL)
 				break;
 			status = ares_parse(hdr->hdr_val, &ar);
@@ -3462,7 +3646,7 @@ mlfi_eom(SMFICTX *ctx)
 				{
 					syslog(LOG_WARNING,
 					       "%s: can't parse %s; ignoring",
-					       afc->mctx_jobid, AR_HEADER_NAME);
+					       afc->mctx_jobid, AUTHRESULTSHDR);
 				}
 
 				continue;
@@ -3476,13 +3660,11 @@ mlfi_eom(SMFICTX *ctx)
 
 				for (n = 0; n < ar.ares_count; n++)
 				{
-					if (ar.ares_result[n].result_method == ARES_METHOD_ARC &&
-					    BITSET(ARC_MODE_SIGN, cc->cctx_mode))
+					if (ar.ares_result[n].result_method == ARES_METHOD_ARC)
 					{
 						/*
 						**  If it's an ARC result under
-						**  our authserv-id and we're
-						**  not verifying, use that
+						**  our authserv-id, use that
 						**  value as the chain state.
 						*/
 
@@ -3506,16 +3688,16 @@ mlfi_eom(SMFICTX *ctx)
 
 						switch (ar.ares_result[n].result_result)
 						{
+						    case ARES_RESULT_NONE:
+							cv = ARC_CHAIN_NONE;
+							break;
+
 						    case ARES_RESULT_PASS:
 							cv = ARC_CHAIN_PASS;
 							break;
 
 						    case ARES_RESULT_FAIL:
 							cv = ARC_CHAIN_FAIL;
-							break;
-
-						    case ARES_RESULT_NONE:
-							cv = ARC_CHAIN_NONE;
 							break;
 
 						    default:
@@ -3533,6 +3715,12 @@ mlfi_eom(SMFICTX *ctx)
 
 						arc_set_cv(afc->mctx_arcmsg,
 						           cv);
+					}
+
+					if (arcf_dstring_len(afc->mctx_tmpstr) > 0)
+					{
+						arcf_dstring_cat(afc->mctx_tmpstr,
+						                 "; ");
 					}
 
 					arcf_dstring_printf(afc->mctx_tmpstr,
@@ -3558,26 +3746,14 @@ mlfi_eom(SMFICTX *ctx)
 						                    ar.ares_result[n].result_value[m]);
 					}
 
-					if (ar.ares_result[0].result_reason[0] != '\0')
+					if (ar.ares_result[n].result_reason[0] != '\0')
 					{
 						arcf_dstring_printf(afc->mctx_tmpstr,
 						                    " reason=\"%s\"",
-						                    ar.ares_result[0].result_reason);
+						                    ar.ares_result[n].result_reason);
 					}
-
-					if (n != ar.ares_count - 1)
-						arcf_dstring_cat(afc->mctx_tmpstr, "; ");
 				}
 			}
-		}
-
-		/* append our chain status if verifying */
-		if (BITSET(ARC_MODE_VERIFY, cc->cctx_mode))
-		{
-			if (arcf_dstring_len(afc->mctx_tmpstr) > 0)
-				arcf_dstring_cat(afc->mctx_tmpstr, "; ");
-			arcf_dstring_printf(afc->mctx_tmpstr, "arc=%s",
-			                    arc_chain_str(afc->mctx_arcmsg));
 		}
 
 		/*
@@ -3610,15 +3786,26 @@ mlfi_eom(SMFICTX *ctx)
 		     sealhdr = arc_hdr_next(sealhdr))
 		{
 			size_t len;
-			u_char *hfptr;
+			u_char *hfvdest;
 			u_char hfname[BUFRSZ + 1];
+			u_char hfvalue[BUFRSZ + 1];
 
-			hfptr = arc_hdr_name(sealhdr, &len);
 			memset(hfname, '\0', sizeof hfname);
-			strncpy(hfname, hfptr, len);
+			strlcpy(hfname, arc_hdr_name(sealhdr, &len),
+			        sizeof hfname);
+			hfname[len] = '\0';
 
-			status = arcf_insheader(ctx, 1, hfname,
-			                        arc_hdr_value(sealhdr));
+			hfvdest = hfvalue;
+			memset(hfvalue, '\0', sizeof hfvalue);
+			if (cc->cctx_noleadspc)
+			{
+				hfvalue[0] = ' ';
+				hfvdest++;
+			}
+			strlcat(hfvalue, arc_hdr_value(sealhdr),
+			        sizeof hfvalue);
+
+			status = arcf_insheader(ctx, 1, hfname, hfvalue);
 			if (status == MI_FAILURE)
 			{
 				if (conf->conf_dolog)
@@ -3639,12 +3826,41 @@ mlfi_eom(SMFICTX *ctx)
  		**  Authentication-Results
 		*/
 
+		int arcchainlen = arc_chain_custody_str(afc->mctx_arcmsg,
+		                                        arcchainbuf,
+		                                        sizeof(arcchainbuf));
+
+		if (arcchainlen >= sizeof(arcchainbuf))
+		{
+			if (conf->conf_dolog)
+			{
+				syslog(LOG_ERR,
+				       "%s: arc.chain buffer overflow: %s",
+				       afc->mctx_jobid, "");
+			}
+
+			return SMFIS_TEMPFAIL;
+		}
+
 		arcf_dstring_blank(afc->mctx_tmpstr);
 		arcf_dstring_printf(afc->mctx_tmpstr,
 		                    "%s%s; arc=%s",
 		                    cc->cctx_noleadspc ? " " : "",
 		                    conf->conf_authservid,
-		                    arc_chain_str(afc->mctx_arcmsg));
+		                    arc_chain_status_str(afc->mctx_arcmsg));
+
+		if (ipout != NULL)
+		{
+			arcf_dstring_printf(afc->mctx_tmpstr,
+			                    " smtp.remote-ip=%s", ipout);
+		}
+
+		if (conf->conf_finalreceiver && arcchainlen > 0)
+		{
+			arcf_dstring_printf(afc->mctx_tmpstr,
+			                    " arc.chain=%s", arcchainbuf);
+		}
+
 		if (arcf_insheader(ctx, 1, AUTHRESULTSHDR,
 		                   arcf_dstring_get(afc->mctx_tmpstr)) != MI_SUCCESS)
 		{

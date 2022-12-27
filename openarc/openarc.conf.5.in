@@ -176,6 +176,16 @@ Specifies the path to a file that should be created at process start
 containing the process ID.
 
 .TP
+.I SealHeaderChecks (string)
+Identifies a file containing header checks that should be done to determine
+whether to seal a message.  Each entry in this file must be of the form
+"name:regexp".  When this feature is set, messages will only be processed
+by the filter if any instance of the named header field exists and has a
+value matching the provided regular expression.  If the value of an
+instance appears to be a JSON list, then the regular expression is applied
+to all strings in the list.
+
+.TP
 .I SignatureAlgorithm (string)
 Selects the signing algorithm to use when generating signatures.
 Use 'openarc \-V' to see the list of supported algorithms.

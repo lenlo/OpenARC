@@ -28,6 +28,11 @@
 /* libopenarc */
 #include "arc.h"
 
+/* libjansson */
+#ifdef USE_JANSSON
+# include <jansson.h>
+#endif /* USE_JANSSON */
+
 /* make sure we have TRUE and FALSE */
 #ifndef FALSE
 # define FALSE		0
@@ -45,6 +50,7 @@
 #define	HOSTUNKNOWN	"unknown-host"
 #define	JOBIDUNKNOWN	"(unknown-jobid)"
 #define	LOCALHOST	"127.0.0.1"
+#define	LOCALHOST6	"::1"
 #define	MAXADDRESS	256
 #define	MAXARGV		65536
 #define	MAXBUFRSZ	65536
